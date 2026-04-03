@@ -1,5 +1,4 @@
 # Turing Test Judge Benchmark — Evaluation Script
-================================================
 Given a dataset of paired dialogues (A and B), predict which is the human-human dialogue.
 
 ## SETUP
@@ -14,13 +13,13 @@ Given a dataset of paired dialogues (A and B), predict which is the human-human 
 4. Configure necessary changes in `config.py`. Here you can adjust the prompt, set multithreading config, and handle API call delay.
 
 4. Run:
-       ### Default
+   ### Default
        python run_eval.py
 
-       ### Save output to a custom path
+   ### Save output to a custom path
        python run_eval.py --output my_predictions.csv
 
-       ### Add a delay between API calls (seconds, useful for rate limits)
+   ### Add a delay between API calls (seconds, useful for rate limits)
        python run_eval.py --delay 0.5
 
 ## OUTPUT FORMAT
