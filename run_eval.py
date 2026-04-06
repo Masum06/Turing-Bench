@@ -6,6 +6,7 @@ from threading import Lock
 
 from config import USE_THREADS, N_THREADS
 from predict import predict
+from tinyagent import *
 
 import pandas as pd
 from tqdm import tqdm
@@ -15,48 +16,14 @@ HF_DATASET_PATH = "hf://datasets/roc-hci/Turing-Bench/turing_bench_public_shuffl
 HF_SPLIT        = "train"
 
 
-def load_json(s: str) -> dict | None:
-    import json
+def load_data() -> pd.DataFrame:
+    print(f"Loading data from HuggingFace: {HF_DATASET_PATH}")
     try:
-        return json.loads(s)
-    except json.JSONDecodeError:
-        return None
-
-
-def parse_json(reply: str) -> dict | None:
-    if not reply:
-        print("Empty reply")
-        return None
-
-    reply = reply.strip()
-    if reply.startswith("```json"):
-        reply = reply[len("```json"):].strip()
-        if reply.endswith("```"):
-            reply = reply[:-3].strip()
-
-    if not (reply.startswith("{") and reply.endswith("}")):
-        print("Not JSON structure")
-        return None
-
-    try:
-        return load_json(reply)
-    except Exception:
-        print("Error parsing JSON")
-        return None
-
-
-def load_data(input_path: str | None) -> pd.DataFrame:
-    if input_path:
-        print(f"Loading data from local file: {input_path}")
-        df = pd.read_csv(input_path)
-    else:
-        print(f"Loading data from HuggingFace: {HF_DATASET_PATH}")
-        try:
-            from datasets import load_dataset
-        except ImportError:
-            sys.exit("datasets package not found. Run: pip install datasets")
-        ds = load_dataset("csv", data_files=HF_DATASET_PATH, split=HF_SPLIT)
-        df = ds.to_pandas()
+        from datasets import load_dataset
+    except ImportError:
+        sys.exit("datasets package not found. Run: pip install datasets")
+    ds = load_dataset("csv", data_files=HF_DATASET_PATH, split=HF_SPLIT)
+    df = ds.to_pandas()
 
     missing = {"dialogueA", "dialogueB"} - set(df.columns)
     if missing:
@@ -70,9 +37,7 @@ def run_single(rows: list[dict], delay: float) -> list[tuple[int, str]]:
     results = []
     for row in tqdm(rows, desc="Running predictions (single-threaded)"):
         try:
-            pred = parse_json(
-                predict(str(row["dialogueA"]), str(row["dialogueB"]))
-            )["result"]["verdict"]
+            pred = predict(str(row["dialogueA"]), str(row["dialogueB"]))["result"]["verdict"]
             if pred not in ("A", "B"):
                 raise ValueError(f"predict() returned {pred!r} — must be 'A' or 'B'")
         except NotImplementedError:
@@ -105,9 +70,7 @@ def run_threaded(rows: list[dict], delay: float, n_threads: int) -> list[tuple[i
     def worker(row: dict) -> tuple[int, str]:
         nonlocal errors, completed
         try:
-            pred = parse_json(
-                predict(str(row["dialogueA"]), str(row["dialogueB"]))
-            )["result"]["verdict"]
+            pred = predict(str(row["dialogueA"]), str(row["dialogueB"]))["result"]["verdict"]
             if pred not in ("A", "B"):
                 raise ValueError(f"predict() returned {pred!r} — must be 'A' or 'B'")
         except NotImplementedError:
@@ -151,7 +114,7 @@ def main():
     )
     args = parser.parse_args()
 
-    df = load_data(args.input)
+    df = load_data()
     print(f"Loaded {len(df)} examples.\n")
 
     # Attach index so threaded results can be re-ordered correctly

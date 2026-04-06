@@ -5,10 +5,11 @@
 #  transcripts as plain strings and must return either "A" or "B".
 #
 #  Use SYSTEM_PROMPT and USER_TEMPLATE.format(dialogueA=..., dialogueB=...)
-#  to build your prompt.
+#  to build your prompt (found in config.py).
 #
 #  A few copy-paste starter examples are included as comments beneath
-#  the function.
+#  the function. Some of these use tinyagent.py, a wrapper class that 
+#  handles model configuration automatically.
 #
 #  Thread safety: if USE_THREADS = True, predict() will be called from
 #  multiple threads simultaneously. Stateless API clients (OpenAI, Groq, etc.)
@@ -16,48 +17,35 @@
 #  your pipeline/model object is thread-safe.
 # ══════════════════════════════════════════════════════════════════════════════
 from config import SYSTEM_PROMPT, USER_TEMPLATE, MAX_RETRIES, BASE_DELAY
-
+from tinyagent import *
+"""
 def predict(dialogueA: str, dialogueB: str) -> str:
-    """
+    
     Return "A" if dialogueA is the human-human conversation, "B" otherwise.
     Replace the body of this function with your own model call.
-    """
+    
     raise NotImplementedError(
         "Please fill in the predict() function with your model. "
         "See the examples in the comments below."
     )
-# EXAMPLE A — OpenAI-compatible API (OpenAI, Together, Groq, Ollama, etc.)
-# Works with any provider that follows the OpenAI chat completion format.
-# Safe with USE_THREADS = True
 """
-Terminal: pip install openai
 
-import os
 import time
-from openai import OpenAI, RateLimitError, APIError
-
-client = OpenAI(
-    api_key=os.environ["OPENAI_API_KEY"],   # or your provider's key
-    base_url="https://api.openai.com/v1",   # swap for Groq/Together/etc.
-)
+from openai import RateLimitError, APIError
 
 MAX_RETRIES = 5
 BASE_DELAY  = 1.0   # seconds — doubles each attempt: 1, 2, 4, 8, 16
 
 def predict(dialogueA: str, dialogueB: str) -> str:
     prompt = USER_TEMPLATE.format(dialogueA=dialogueA, dialogueB=dialogueB)
+
     for attempt in range(MAX_RETRIES):
         try:
-            resp = client.chat.completions.create(
-                model="gpt-4o",             # swap for any model name
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": prompt},
-                ],
-                max_completion_tokens=1024,
-                temperature=1,
-            )
-            return resp.choices[0].message.content
+            agent = TinyAgent(model="gpt-5")
+            agent.set_max_tokens(1024)
+            agent.set_reasoning_effort("medium")
+            agent.add_system_message(SYSTEM_PROMPT)
+            return agent.call_json(prompt=prompt)
         except RateLimitError:
             wait = BASE_DELAY * (2 ** attempt)
             print(f"Rate limited (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait:.1f}s...")
@@ -66,6 +54,40 @@ def predict(dialogueA: str, dialogueB: str) -> str:
             wait = BASE_DELAY * (2 ** attempt)
             print(f"API error: {e} (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait:.1f}s...")
             time.sleep(wait)
+
+    raise RuntimeError(f"predict() failed after {MAX_RETRIES} attempts")
+
+# EXAMPLE A — OpenAI-compatible API (OpenAI, Together, Groq, Ollama, etc.)
+# Works with any provider that follows the OpenAI chat completion format.
+# Safe with USE_THREADS = True
+"""
+Terminal: pip install openai
+
+import time
+from openai import RateLimitError, APIError
+
+MAX_RETRIES = 5
+BASE_DELAY  = 1.0   # seconds — doubles each attempt: 1, 2, 4, 8, 16
+
+def predict(dialogueA: str, dialogueB: str) -> str:
+    prompt = USER_TEMPLATE.format(dialogueA=dialogueA, dialogueB=dialogueB)
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            agent = TinyAgent(model="gpt-5")
+            agent.set_max_tokens(1024)
+            agent.set_reasoning_effort("medium")
+            agent.add_system_message(SYSTEM_PROMPT)
+            return agent.call_json(prompt=prompt)
+        except RateLimitError:
+            wait = BASE_DELAY * (2 ** attempt)
+            print(f"Rate limited (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait:.1f}s...")
+            time.sleep(wait)
+        except APIError as e:
+            wait = BASE_DELAY * (2 ** attempt)
+            print(f"API error: {e} (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait:.1f}s...")
+            time.sleep(wait)
+
     raise RuntimeError(f"predict() failed after {MAX_RETRIES} attempts")
 """
 
