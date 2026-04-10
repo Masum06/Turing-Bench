@@ -139,5 +139,50 @@ def main():
         print(f"{errors} row(s) errored and defaulted to 'NA'")
     print("\nNext step: submit your predictions CSV to the leaderboard at https://huggingface.co/spaces/roc-hci/Turing-Bench-Leaderboard")
 
+
+def test(input_path: str | None = None, n_rows: int = 3, output: str = "predictions.csv"):
+    """
+    Smoke-test predict() on the first `n_rows` rows without running the full dataset.
+    Prints results to stdout and saves verdicts to `output`.
+    """
+    df = load_data()
+    df = df.head(n_rows)
+    print(f"Testing on {len(df)} row(s)...\n")
+
+    results = []
+
+    for i, row in df.iterrows():
+        print(f"--- Row {i} ---")
+        try:
+            parsed = predict(str(row["dialogueA"]), str(row["dialogueB"]))
+
+            if parsed is None:
+                print(f"  ✗ parse_json() returned None — raw reply:\n{parsed}\n")
+                continue
+
+            verdict = parsed["result"]["verdict"]
+            if verdict not in ("A", "B"):
+                print(f"  ✗ Bad verdict: {verdict!r} (must be 'A' or 'B')")
+            else:
+                print(f"  ✓ Verdict: {verdict}")
+                results.append(verdict)
+
+        except NotImplementedError:
+            print("  ✗ predict() is not implemented yet.")
+            return
+        except KeyError as exc:
+            print(f"  ✗ Missing key in parsed response: {exc}")
+            print(f"     Parsed output was: {parsed}")
+        except Exception as exc:
+            print(f"  ✗ Unexpected error: {exc}")
+
+        print()
+
+    out_df = pd.DataFrame({"who_is_human": results})
+    out_df.to_csv(output, index=False)
+    print(f"✓ Predictions saved to: {output}")
+    print(f"  Total: {len(results)}  |  A: {results.count('A')}  |  B: {results.count('B')}")
+    print("\nTest complete.")
+
 if __name__ == "__main__":
     main()

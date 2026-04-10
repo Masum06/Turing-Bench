@@ -18,44 +18,17 @@
 # ══════════════════════════════════════════════════════════════════════════════
 from config import SYSTEM_PROMPT, USER_TEMPLATE, MAX_RETRIES, BASE_DELAY
 from tinyagent import *
-"""
+
 def predict(dialogueA: str, dialogueB: str) -> str:
-    
+    """
     Return "A" if dialogueA is the human-human conversation, "B" otherwise.
     Replace the body of this function with your own model call.
+    """
     
     raise NotImplementedError(
         "Please fill in the predict() function with your model. "
         "See the examples in the comments below."
     )
-"""
-
-import time
-from openai import RateLimitError, APIError
-
-MAX_RETRIES = 5
-BASE_DELAY  = 1.0   # seconds — doubles each attempt: 1, 2, 4, 8, 16
-
-def predict(dialogueA: str, dialogueB: str) -> str:
-    prompt = USER_TEMPLATE.format(dialogueA=dialogueA, dialogueB=dialogueB)
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            agent = TinyAgent(model="gpt-5")
-            agent.set_max_tokens(1024)
-            agent.set_reasoning_effort("medium")
-            agent.add_system_message(SYSTEM_PROMPT)
-            return agent.call_json(prompt=prompt)
-        except RateLimitError:
-            wait = BASE_DELAY * (2 ** attempt)
-            print(f"Rate limited (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait:.1f}s...")
-            time.sleep(wait)
-        except APIError as e:
-            wait = BASE_DELAY * (2 ** attempt)
-            print(f"API error: {e} (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait:.1f}s...")
-            time.sleep(wait)
-
-    raise RuntimeError(f"predict() failed after {MAX_RETRIES} attempts")
 
 # EXAMPLE A — OpenAI-compatible API (OpenAI, Together, Groq, Ollama, etc.)
 # Works with any provider that follows the OpenAI chat completion format.
@@ -74,7 +47,7 @@ def predict(dialogueA: str, dialogueB: str) -> str:
 
     for attempt in range(MAX_RETRIES):
         try:
-            agent = TinyAgent(model="gpt-5")
+            agent = TinyAgent(model="gpt-5" provider="openai")
             agent.set_max_tokens(1024)
             agent.set_reasoning_effort("medium")
             agent.add_system_message(SYSTEM_PROMPT)

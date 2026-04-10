@@ -25,7 +25,7 @@ The Investigator (I) is always human. In exactly one
 of the conversations, the Witness W is human, and
 in the other, the Witness W is Artificial Intelligence.
 
-Please provide your response in JSON format:
+Please provide your response the following JSON format, with no additional text or reasoning:
 
 {
 "result": {
