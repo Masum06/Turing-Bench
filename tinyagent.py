@@ -229,9 +229,9 @@ class TinyAgent:
                 reply = str(msg.content[0])
 
         elif provider == "bedrock":
-            import anthropic
+            from anthropic import AnthropicBedrock
 
-            aclient = anthropic.AnthropicBedrock(aws_region="us-east-1")
+            aclient = AnthropicBedrock(aws_region="us-east-1")
 
             system_parts = [m["content"] for m in flat if m["role"] == "system"]
             system = "\n\n".join(system_parts) if system_parts else None
@@ -244,32 +244,23 @@ class TinyAgent:
                     r = "user"
                 anth_msgs.append({"role": r, "content": m["content"]})
 
-            if self.thinking_budget != 0 : 
-                thinking_type = "enabled"
+            if self.thinking_budget and self.thinking_budget >= 1024:
+                # temperature must NOT be passed when thinking is enabled
                 msg = aclient.messages.create(
-                model=self.model,  # e.g. "anthropic.claude-sonnet-4-5"
-                max_tokens=self.max_tokens,
-                system=system,
-                messages=anth_msgs,
-                temperature=self.temperature,
-                thinking = {
-                    "type" : thinking_type,
-                    "budget_tokens" : self.thinking_budget
-                }
-            )
-            else : 
-                thinking_type = "disabled"
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    system=system,
+                    messages=anth_msgs,
+                    thinking={"type": "enabled", "budget_tokens": self.thinking_budget},
+                )
+            else:
                 msg = aclient.messages.create(
-                model=self.model,  # e.g. "anthropic.claude-sonnet-4-5"
-                max_tokens=self.max_tokens,
-                system=system,
-                messages=anth_msgs,
-                temperature=self.temperature,
-                thinking = {
-                    "type" : thinking_type,
-                }
-            )
-
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    system=system,
+                    messages=anth_msgs,
+                    temperature=self.temperature,
+                )
 
             text_parts = []
             for block in msg.content:
@@ -278,7 +269,6 @@ class TinyAgent:
             reply = "".join(text_parts).strip()
             if not reply and msg.content:
                 reply = str(msg.content[0])
-
 
         elif provider == "google":
             from google import genai

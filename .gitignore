@@ -211,3 +211,4 @@ test.py
 
 haiku-4.5-1024-thinking.csv
 haiku-4.5-no-thinking.csv
+local_predict.py

@@ -19,6 +19,7 @@
 from config import SYSTEM_PROMPT, USER_TEMPLATE, MAX_RETRIES, BASE_DELAY
 from tinyagent import *
 
+
 def predict(dialogueA: str, dialogueB: str) -> str:
     """
     Return "A" if dialogueA is the human-human conversation, "B" otherwise.
@@ -47,7 +48,7 @@ def predict(dialogueA: str, dialogueB: str) -> str:
 
     for attempt in range(MAX_RETRIES):
         try:
-            agent = TinyAgent(model="gpt-5" provider="openai")
+            agent = TinyAgent(model="gpt-5", provider="openai")
             agent.set_max_tokens(1024)
             agent.set_reasoning_effort("medium")
             agent.add_system_message(SYSTEM_PROMPT)
