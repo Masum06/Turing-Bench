@@ -1,0 +1,57 @@
+id,dialogueA,dialogueB,who_is_human
+0,"I: Hello, how's it going?
+W: How do you do. Please state your problem.
+I: Pretty good, I'm still to figure out whether you are human or AI
+W: Is it because you are still to figure out whether I are human or AI that you came to me?
+I: Yeah, can you convince me you're human?
+W: You believe I can convince you I are human? don't you?","I: Hello, how's it going?
+W: going great today is actually a beautiful day outside here in florida
+I: Sounds good, I wish I could be outside right now
+W: perfect weather! I am planning on cooking out this evening
+I: Yeah, having some sort of bbq, burgers, or something seems good
+W: absolutely! being able to enjoy time with my hubby",
+1,"I: hey
+W: yo whats up
+I: how's your day going
+W: chill kinda boring tho hbu
+I: honestly same lol i got done with class and now i just have to finish this up
+W: fr what class you had
+I: I had two cogsci classes
+W: yikes sounds rough ngl
+I: haha not as bad as it seems and everyone stops going after like week 3
+W: lmao true empty seats everywhere
+I: what's your major
+W: psych wbu
+I: cogsci haha
+W: lol that explains it
+I: yep pscyh was my second choice if i didn't get cogsci
+W: nice psychs easy chill vibes
+I: ik my roommate is a psych major and she can graduate early and her classes seem pretty nice
+W: yep psych lifes pretty sweet","I: hey
+W: heyy
+I: how's your day going
+W: it's been chill
+I: that cool did you have a lot of classes today
+W: i had one class wbuu
+I: ooo nice! i just had two today
+W: is this huzz?
+I: no it isn't lol
+W: LOL
+I: what an interesting name though lmao
+W: oh huzz is isnt a name its like a slang
+I: okay i'm just old then
+W: you seem like an istj
+I: okay woah there not that old i;m only 22",
+2,"I: hi how are you
+W: im doin alright thx
+I: what did you do today
+W: played some vid games watched youtube vids chillin
+I: what type of youtube videos do you like to watch
+W: mostly gaming vids and meme vids fr
+I: what games do you like
+W: fortnite and overwatch mostly ngl","I: hi how are you
+W: I'm great thanks. How about you?
+I: I'm good! what did you do today
+W: I walked my dog, went shopping at a thrift store and had a cup of coffee at a cafe.
+I: did you buy anything at the thrift store
+W: Yes, I bought a hot pot and some toys for my two nephews.",

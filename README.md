@@ -1,36 +1,115 @@
-# Turing Test Judge Benchmark — Evaluation Script
-Given a dataset of paired dialogues (A and B), predict which is the human-human dialogue.
+﻿# Turing Test Judge Benchmark
 
-## SETUP
------
-1. Install core dependencies:
-       pip install pandas tqdm datasets
+Given paired transcripts **A** and **B**, predict which transcript is the **human-human** dialogue. Output is a CSV with `who_is_human` in `A` or `B`.
 
-2. Install whatever library your model needs.
+## Install
 
-3. Fill in the `predict()` function in `predict.py` with your model.
+```bash
+pip install -r requirements.txt
+```
 
-4. Configure necessary changes in `config.py`. Here you can adjust the prompt, set multithreading configuration, and handle default API call delay.
+This installs **pandas**, **tqdm**, **python-dotenv**, **openai**, and **anthropic** (Anthropic direct API and Bedrock both use the `anthropic` package).
 
-4. Run:
-   ### Default
-       python run_judge.py
+## Quickstart (hosted model)
 
-   ### Save output to a custom path
-       python run_judge.py --output my_predictions.csv
+Pass **`--model` / `-m`**. The provider is **inferred** from the model id (see [`model_clients.MODEL_SUBSTRING_TO_PROVIDER`](model_clients.py)).
 
-   ### Add a delay between API calls (seconds, useful for rate limits)
-       python run_judge.py --delay 0.5
+```bash
+python run_judge.py -m gpt-4o --limit 5 --output smoke.csv
+```
 
-## OUTPUT FORMAT
--------------
+```bash
+python run_judge.py -m claude-sonnet-4-5 --limit 5
+```
 
-#TODO: change note here
-A CSV containing at least the column:  who_is_human  ∈  {"A", "B"}
+Bedrock model ids usually contain `anthropic.` or a regional prefix such as `us.anthropic.`:
 
-## MULTITHREADING
---------------
-Set USE_THREADS = True below to enable parallel inference.
-Set N_THREADS to control the number of worker threads.
-Recommended for API-based models (OpenAI, Groq, Together, etc.).
-NOT recommended for local models (transformers, Ollama) — use N_THREADS = 1.0
+```bash
+python run_judge.py -m us.anthropic.claude-3-5-sonnet-20240620-v1:0 --aws-region us-east-1 --limit 5
+```
+
+Override inference if needed:
+
+```bash
+python run_judge.py --provider anthropic -m claude-sonnet-4-5 --limit 5
+```
+
+Full run on the default benchmark file:
+
+```bash
+python run_judge.py -m gpt-4o --output predictions.csv
+```
+
+Submit `predictions.csv`: https://huggingface.co/spaces/roc-hci/TuringBench-2-Leaderboard
+
+## Custom `predict.py` hook
+
+```bash
+python run_judge.py --provider custom --input sample.csv --limit 3 --no-threads
+```
+
+Implement `predict()` in [`predict.py`](predict.py). See [`examples_predict.md`](examples_predict.md).
+
+## Adding a model
+
+1. Open [`model_clients.py`](model_clients.py) and find **`MODEL_SUBSTRING_TO_PROVIDER`** (ordered list: first match wins).
+2. Add a **lowercase substring** that appears in your model id, paired with **`openai`**, **`anthropic`**, or **`bedrock`**.
+3. Set the right **API key** / AWS credentials (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or Bedrock + `AWS_REGION`).
+4. Run: `python run_judge.py -m <your-model-id>`.
+
+If the id is ambiguous or you prefer not to edit the list, pass **`--provider openai`**, **`anthropic`**, or **`bedrock`** explicitly.
+
+## CLI reference
+
+| Flag | Purpose |
+|------|---------|
+| `--provider` | `auto` (default): infer from `-m`; or `openai`, `anthropic`, `bedrock`, `custom` |
+| `--model`, `-m` | Hosted model id (`auto` / `openai` / `anthropic` / `bedrock`); omit for `custom` |
+| `--aws-region` | Optional for Bedrock (else SDK / boto3 region resolution) |
+| `--input`, `-i` | Input CSV (default: `turing_test_o50_conversations_shuffled.csv`) |
+| `--output`, `-o` | Output CSV |
+| `--errors` | Error log CSV when rows fail |
+| `--delay` | Sleep after each row (rate limits) |
+| `--threads`, `-j` | Parallel workers (from `config.USE_THREADS` / `N_THREADS` by default) |
+| `--no-threads` | Force single-threaded |
+| `--limit` | First N rows only |
+| `--resume` | Reuse `A`/`B` from existing `--output` |
+
+Sampling temperature, max tokens, and reasoning knobs use **defaults** in code (`ModelClient` in [`model_clients.py`](model_clients.py)); change there if you need different behavior.
+
+## Environment variables
+
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `AWS_REGION` (Bedrock; or pass `--aws-region`)
+
+## Architecture
+
+- [`model_clients.py`](model_clients.py): abstract `ModelClient` + OpenAI / Anthropic / Bedrock / custom clients and `create_model_client()`.
+- [`run_judge.py`](run_judge.py): `run_benchmark()` loads the CSV, runs `client.predict()` per row (threaded or not), writes output.
+- [`config.py`](config.py): thread defaults, retry timing, `SYSTEM_PROMPT` / `USER_TEMPLATE` (do not change benchmark text without coordinating with the task).
+- [`predict.py`](predict.py): optional; only for `--provider custom`.
+
+### Provider caveats
+
+- **Anthropic / Bedrock**: Extended thinking (if enabled in code via `thinking_budget`) uses `thinking: {type: "enabled", budget_tokens}` with `budget_tokens >= 1024` and `max_tokens > budget_tokens`, per the [Messages API](https://docs.claude.com/en/api/messages).
+- **OpenAI**: Uses `responses.create` with `text.format.type = json_object` (Responses API “JSON mode”).
+
+## Threading
+
+Use multiple threads for remote APIs when safe.
+
+## Files
+
+| File | Role |
+|------|------|
+| `run_judge.py` | CLI + threading + CSV I/O |
+| `model_clients.py` | Providers |
+| `config.py` | Defaults + prompts |
+| `predict.py` | Custom-only hook |
+| `sample.csv` | Tiny CSV for smoke tests |
+| `requirements.txt` | Dependencies |
+
+## License
+
+See [LICENSE](LICENSE).
