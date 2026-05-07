@@ -79,9 +79,12 @@ Sampling temperature, max tokens, and reasoning knobs use **defaults** in code (
 
 ## Environment variables
 
+Variables are read from the process environment. You can set them in a **`.env`** file in the project root; [`config.py`](config.py) calls `load_dotenv()` at import time so they are available everywhere the app imports `config` or `model_clients`.
+
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `AWS_REGION` (Bedrock; or pass `--aws-region`)
+- `AWS_BEARER_TOKEN_BEDROCK` — [Bedrock API key](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys-use.html); picked up by boto3 (use a recent `boto3` if auth fails)
 
 ## Architecture
 

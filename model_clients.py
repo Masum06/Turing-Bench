@@ -22,11 +22,7 @@ import os
 import time
 from typing import Any
 
-from dotenv import load_dotenv
-
 from config import BASE_DELAY, MAX_RETRIES, SYSTEM_PROMPT, USER_TEMPLATE
-
-load_dotenv()
 
 # Order matters: first match wins (list longer / more specific substrings first).
 MODEL_SUBSTRING_TO_PROVIDER: list[tuple[str, str]] = [
@@ -305,7 +301,12 @@ class AnthropicModelClient(ModelClient):
 
 
 class BedrockAnthropicClient(ModelClient):
-    """Anthropic-compatible models on AWS Bedrock (region from env or ``aws_region``)."""
+    """Anthropic-compatible models on AWS Bedrock.
+
+    Set ``AWS_REGION`` (or ``--aws-region``) and authenticate with a Bedrock API key in
+    ``AWS_BEARER_TOKEN_BEDROCK`` (read automatically by boto3) or another boto3 credential
+    source you already use.
+    """
 
     def __init__(self, model: str, *, aws_region: str | None = None, **kwargs: Any) -> None:
         super().__init__(model, **kwargs)

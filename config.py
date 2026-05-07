@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 #  MULTITHREADING CONFIG
 USE_THREADS = True   # Set True to enable parallel inference
 N_THREADS   = 10      # Number of worker threads (ignored if USE_THREADS = False)
