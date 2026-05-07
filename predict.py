@@ -19,17 +19,16 @@
 from config import SYSTEM_PROMPT, USER_TEMPLATE, MAX_RETRIES, BASE_DELAY
 from tinyagent import *
 
-
 def predict(dialogueA: str, dialogueB: str) -> str:
     """
     Return "A" if dialogueA is the human-human conversation, "B" otherwise.
     Replace the body of this function with your own model call.
     """
-    
     raise NotImplementedError(
         "Please fill in the predict() function with your model. "
         "See the examples in the comments below."
     )
+
 
 # EXAMPLE A — OpenAI-compatible API (OpenAI, Together, Groq, Ollama, etc.)
 # Works with any provider that follows the OpenAI chat completion format.
@@ -65,6 +64,9 @@ def predict(dialogueA: str, dialogueB: str) -> str:
     raise RuntimeError(f"predict() failed after {MAX_RETRIES} attempts")
 """
 
+
+
+# TODO: read through and get rid of
 # EXAMPLE B — Hugging Face transformers (local model)
 # Set USE_THREADS = False for local models
 """

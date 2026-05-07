@@ -6,25 +6,27 @@ Given a dataset of paired dialogues (A and B), predict which is the human-human 
 1. Install core dependencies:
        pip install pandas tqdm datasets
 
-2. Install whatever library your model needs (see examples below).
+2. Install whatever library your model needs.
 
 3. Fill in the `predict()` function in `predict.py` with your model.
 
-4. Configure necessary changes in `config.py`. Here you can adjust the prompt, set multithreading config, and handle API call delay.
+4. Configure necessary changes in `config.py`. Here you can adjust the prompt, set multithreading configuration, and handle default API call delay.
 
 4. Run:
    ### Default
-       python run_eval.py
+       python run_judge.py
 
    ### Save output to a custom path
-       python run_eval.py --output my_predictions.csv
+       python run_judge.py --output my_predictions.csv
 
    ### Add a delay between API calls (seconds, useful for rate limits)
-       python run_eval.py --delay 0.5
+       python run_judge.py --delay 0.5
 
 ## OUTPUT FORMAT
 -------------
-A single-column CSV:  who_is_human  ∈  {"A", "B"}
+
+#TODO: change note here
+A CSV containing at least the column:  who_is_human  ∈  {"A", "B"}
 
 ## MULTITHREADING
 --------------

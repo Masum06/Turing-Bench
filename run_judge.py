@@ -12,18 +12,13 @@ import pandas as pd
 from tqdm import tqdm
 
 #  Internals
-HF_DATASET_PATH = "hf://datasets/roc-hci/TuringBench-2-Questions/turing_test_o50_conversations_shuffled.csv"
+DATASET_PATH = "turing_test_o50_conversations_shuffled.csv"
 HF_SPLIT        = "train"
 
 
 def load_data() -> pd.DataFrame:
-    print(f"Loading data from HuggingFace: {HF_DATASET_PATH}")
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        sys.exit("datasets package not found. Run: pip install datasets")
-    ds = load_dataset("csv", data_files=HF_DATASET_PATH, split=HF_SPLIT)
-    df = ds.to_pandas()
+    print(f"Loading data: {DATASET_PATH}")
+    df = pd.read_csv(DATASET_PATH)
 
     missing = {"dialogueA", "dialogueB"} - set(df.columns)
     if missing:
@@ -125,11 +120,21 @@ def main():
     else:
         ordered = run_single(rows, args.delay)
 
+    na_indices = {idx for idx, pred in ordered if pred == "NA"}
+    if na_indices:
+        na_rows = [row for row in rows if row["_idx"] in na_indices]
+        print(f"\nRetrying {len(na_rows)} NA row(s) sequentially...")
+        retry_results = dict(run_single(na_rows, args.delay))
+        ordered = [(idx, retry_results.get(idx, pred)) for idx, pred in ordered]
+        still_na = sum(1 for _, pred in ordered if pred == "NA")
+        recovered = len(na_indices) - still_na
+        print(f"Retry complete — recovered: {recovered}  |  still NA: {still_na}")
+    
     preds   = [pred for _, pred in ordered]
     errors  = preds.count("NA")
 
-    out_df = pd.DataFrame({"who_is_human": preds})
-    out_df.to_csv(args.output, index=False)
+    df["who_is_human"] = preds
+    df.to_csv(args.output, index=False)
 
     print(f"\n✓ Predictions saved to: {args.output}")
     print(f"  Total : {len(preds)}  |  A: {preds.count('A')}  |  B: {preds.count('B')}  |  NA: {errors}")
