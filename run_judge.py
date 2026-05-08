@@ -246,6 +246,16 @@ def main() -> None:
         help="AWS region for Bedrock (optional; otherwise SDK/boto3 default chain).",
     )
     parser.add_argument(
+        "--reasoning-effort",
+        default=None,
+        help=(
+            "Provider-native reasoning control. GPT-5/o-series accept low, medium, "
+            "or high; GPT-4 and lower reject it. Claude accepts Anthropic adaptive "
+            "thinking values such as on, off, low, medium, high, max, or xhigh "
+            "(model support varies)."
+        ),
+    )
+    parser.add_argument(
         "--input",
         "-i",
         default=DATASET_PATH,
@@ -310,6 +320,7 @@ def main() -> None:
             args.provider,
             args.model,
             aws_region=args.aws_region,
+            reasoning_effort=args.reasoning_effort,
         )
     except ValueError as e:
         sys.exit(str(e))

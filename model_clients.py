@@ -11,8 +11,9 @@ Supported hosted APIs:
 
 To support a new model id string, add a substring entry to ``MODEL_SUBSTRING_TO_PROVIDER``.
 
-Reasoning vs thinking: OpenAI uses ``reasoning={"effort": ...}`` on reasoning models;
-Anthropic/Bedrock use ``thinking`` with ``type: "enabled"`` and ``budget_tokens`` (>= 1024).
+Reasoning vs thinking: OpenAI uses ``reasoning={"effort": ...}`` on reasoning
+models; newer Claude models use adaptive thinking via ``thinking.type`` and
+``output_config.effort``. Claude 4.5 uses on/off thinking only in this runner.
 """
 from __future__ import annotations
 
@@ -41,6 +42,11 @@ MODEL_SUBSTRING_TO_PROVIDER: list[tuple[str, str]] = [
     ("o4", "openai"),
     ("o5", "openai"),
 ]
+
+OPENAI_REASONING_EFFORTS = ("low", "medium", "high")
+CLAUDE_REASONING_EFFORTS = ("on", "off", "low", "medium", "high", "max", "xhigh")
+CLAUDE_ON_OFF_EFFORTS = ("on", "off")
+CLAUDE_ON_THINKING_BUDGET = 1024
 
 
 def infer_provider_from_model(model: str) -> str:
@@ -100,28 +106,33 @@ def _verdict_from_json_string(text: str) -> str | None:
 class ModelClient(abc.ABC):
     """
     Stateless per-row callers: builds system+user from config and parses model output.
-    reasoning_effort: mapped for OpenAI Responses on reasoning models.
-    thinking_budget: Anthropic/Bedrock extended thinking (>0 enables; API requires >= 1024).
+    reasoning_effort: mapped to OpenAI reasoning effort and Claude thinking effort.
     """
 
     def __init__(
         self,
         model: str,
         *,
-        reasoning_effort: str = "low",
-        thinking_budget: int = 0,
+        reasoning_effort: str | None = None,
         max_tokens: int = 3072,
         temperature: float = 1.0,
         max_retries: int = MAX_RETRIES,
         base_delay: float = BASE_DELAY,
     ) -> None:
         self.model = model
-        self.reasoning_effort = (reasoning_effort or "low").strip().lower()
-        self.thinking_budget = int(thinking_budget)
+        self.reasoning_effort = self._normalize_reasoning_effort(reasoning_effort)
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.max_retries = max_retries
         self.base_delay = base_delay
+
+    def _normalize_reasoning_effort(self, reasoning_effort: str | None) -> str | None:
+        if reasoning_effort is None:
+            return None
+        effort = reasoning_effort.strip().lower()
+        if not effort:
+            return None
+        return effort
 
     def build_messages(self, dialogue_a: str, dialogue_b: str) -> list[dict[str, str]]:
         user_text = USER_TEMPLATE.format(dialogueA=dialogue_a, dialogueB=dialogue_b)
@@ -211,14 +222,31 @@ class OpenAIModelClient(ModelClient):
         text_fmt = {"format": {"type": "json_object"}}
 
         if self._openai_uses_reasoning_parameter():
+            if self.reasoning_effort and self.reasoning_effort not in OPENAI_REASONING_EFFORTS:
+                raise ValueError(
+                    f"OpenAI reasoning models accept --reasoning-effort values: "
+                    f"{', '.join(OPENAI_REASONING_EFFORTS)}. "
+                    f"Got {self.reasoning_effort!r}."
+                )
+            reasoning = (
+                {"effort": self.reasoning_effort}
+                if self.reasoning_effort
+                else {"effort": "low"}
+            )
             response = client.responses.create(
                 model=self.model,
                 input=inp,
-                reasoning={"effort": self.reasoning_effort},
+                reasoning=reasoning,
                 max_output_tokens=self.max_tokens,
                 text={**text_fmt, "verbosity": "low"},
             )
         else:
+            if self.reasoning_effort:
+                raise ValueError(
+                    f"OpenAI model {self.model!r} does not support --reasoning-effort. "
+                    "Only GPT-5 and o-series models use OpenAI reasoning.effort. "
+                    "Remove --reasoning-effort or choose a reasoning-capable model."
+                )
             response = client.responses.create(
                 model=self.model,
                 input=inp,
@@ -237,6 +265,54 @@ class AnthropicModelClient(ModelClient):
     def __init__(self, model: str, **kwargs: Any) -> None:
         super().__init__(model, **kwargs)
         self._client = None
+
+    def _claude_uses_on_off_thinking(self) -> bool:
+        return "4-5" in self.model.lower()
+
+    def _apply_claude_thinking(self, kw: dict[str, Any]) -> None:
+        if not self.reasoning_effort:
+            return
+
+        if self.reasoning_effort not in CLAUDE_REASONING_EFFORTS:
+            raise ValueError(
+                "Claude accepts --reasoning-effort values: "
+                f"{', '.join(CLAUDE_REASONING_EFFORTS)}. "
+                f"Got {self.reasoning_effort!r}. "
+                "These are passed through using Anthropic's adaptive thinking API; "
+                "choose a value supported by your Claude model."
+            )
+
+        kw.pop("temperature", None)
+
+        if self._claude_uses_on_off_thinking():
+            if self.reasoning_effort not in CLAUDE_ON_OFF_EFFORTS:
+                raise ValueError(
+                    f"Claude 4.5 models accept --reasoning-effort values: "
+                    f"{', '.join(CLAUDE_ON_OFF_EFFORTS)}. "
+                    f"Got {self.reasoning_effort!r}. "
+                    "Use Claude 4.6+ / Opus 4.7-style models for adaptive "
+                    "effort values such as low, medium, high, max, or xhigh."
+                )
+            if self.reasoning_effort == "off":
+                kw["thinking"] = {"type": "disabled"}
+                return
+            kw["max_tokens"] = max(
+                int(kw["max_tokens"]),
+                CLAUDE_ON_THINKING_BUDGET + 1024,
+            )
+            kw["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": CLAUDE_ON_THINKING_BUDGET,
+            }
+            return
+
+        if self.reasoning_effort == "off":
+            kw["thinking"] = {"type": "disabled"}
+            return
+
+        kw["thinking"] = {"type": "adaptive"}
+        if self.reasoning_effort != "on":
+            kw["output_config"] = {"effort": self.reasoning_effort}
 
     def _ensure_client(self):
         if self._client is not None:
@@ -271,22 +347,10 @@ class AnthropicModelClient(ModelClient):
             "temperature": self.temperature,
         }
 
-        if self.thinking_budget > 0:
-            if self.thinking_budget < 1024:
-                raise ValueError(
-                    "Anthropic extended thinking requires thinking_budget >= 1024 "
-                    "(see Claude Messages API / extended thinking docs)."
-                )
-            if self.max_tokens <= self.thinking_budget:
-                raise ValueError(
-                    "When extended thinking is on, max_tokens must be greater than "
-                    "thinking_budget (API requires budget_tokens < max_tokens)."
-                )
-            kw.pop("temperature", None)
-            kw["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": self.thinking_budget,
-            }
+        if self.reasoning_effort:
+            self._apply_claude_thinking(kw)
+        else:
+            kw["thinking"] = {"type": "disabled"}
 
         msg = client.messages.create(**kw)
         text_parts = []
@@ -312,6 +376,54 @@ class BedrockAnthropicClient(ModelClient):
         super().__init__(model, **kwargs)
         self._aws_region = aws_region or os.environ.get("AWS_REGION")
         self._client = None
+
+    def _claude_uses_on_off_thinking(self) -> bool:
+        return "4-5" in self.model.lower()
+
+    def _apply_claude_thinking(self, kw: dict[str, Any]) -> None:
+        if not self.reasoning_effort:
+            return
+
+        if self.reasoning_effort not in CLAUDE_REASONING_EFFORTS:
+            raise ValueError(
+                "Claude Bedrock accepts --reasoning-effort values: "
+                f"{', '.join(CLAUDE_REASONING_EFFORTS)}. "
+                f"Got {self.reasoning_effort!r}. "
+                "These are passed through using Anthropic's adaptive thinking API; "
+                "choose a value supported by your Claude model."
+            )
+
+        kw.pop("temperature", None)
+
+        if self._claude_uses_on_off_thinking():
+            if self.reasoning_effort not in CLAUDE_ON_OFF_EFFORTS:
+                raise ValueError(
+                    f"Claude 4.5 Bedrock models accept --reasoning-effort values: "
+                    f"{', '.join(CLAUDE_ON_OFF_EFFORTS)}. "
+                    f"Got {self.reasoning_effort!r}. "
+                    "Use Claude 4.6+ / Opus 4.7-style models for adaptive "
+                    "effort values such as low, medium, high, max, or xhigh."
+                )
+            if self.reasoning_effort == "off":
+                kw["thinking"] = {"type": "disabled"}
+                return
+            kw["max_tokens"] = max(
+                int(kw["max_tokens"]),
+                CLAUDE_ON_THINKING_BUDGET + 1024,
+            )
+            kw["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": CLAUDE_ON_THINKING_BUDGET,
+            }
+            return
+
+        if self.reasoning_effort == "off":
+            kw["thinking"] = {"type": "disabled"}
+            return
+
+        kw["thinking"] = {"type": "adaptive"}
+        if self.reasoning_effort != "on":
+            kw["output_config"] = {"effort": self.reasoning_effort}
 
     def _ensure_client(self):
         if self._client is not None:
@@ -342,18 +454,11 @@ class BedrockAnthropicClient(ModelClient):
             "messages": anth_msgs,
         }
 
-        if self.thinking_budget >= 1024:
-            if self.max_tokens <= self.thinking_budget:
-                raise ValueError(
-                    "When Bedrock extended thinking is on, max_tokens must be greater "
-                    "than thinking_budget."
-                )
-            kw["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": self.thinking_budget,
-            }
+        if self.reasoning_effort:
+            self._apply_claude_thinking(kw)
         else:
             kw["temperature"] = self.temperature
+            kw["thinking"] = {"type": "disabled"}
 
         msg = client.messages.create(**kw)
         text_parts = []
@@ -402,6 +507,7 @@ def create_model_client(
     model: str | None,
     *,
     aws_region: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> ModelClient:
     """
     Build a ``ModelClient``.
@@ -425,10 +531,40 @@ def create_model_client(
             "Use: auto, openai, anthropic, bedrock, custom."
         )
 
+    if reasoning_effort:
+        effort = reasoning_effort.strip().lower()
+        if prov in ("anthropic", "bedrock") and effort not in CLAUDE_REASONING_EFFORTS:
+            raise ValueError(
+                f"Claude accepts --reasoning-effort values: "
+                f"{', '.join(CLAUDE_REASONING_EFFORTS)}. Got {reasoning_effort!r}. "
+                "Pass the exact Anthropic value supported by your selected Claude model."
+            )
+        if prov == "openai":
+            openai_client = OpenAIModelClient(model, reasoning_effort=reasoning_effort)
+            if not openai_client._openai_uses_reasoning_parameter():
+                raise ValueError(
+                    f"OpenAI model {model!r} does not support --reasoning-effort. "
+                    "Only GPT-5 and o-series models use OpenAI reasoning.effort. "
+                    "Remove --reasoning-effort or choose a reasoning-capable model."
+                )
+            if (
+                openai_client._openai_uses_reasoning_parameter()
+                and effort not in OPENAI_REASONING_EFFORTS
+            ):
+                raise ValueError(
+                    f"OpenAI reasoning models accept --reasoning-effort values: "
+                    f"{', '.join(OPENAI_REASONING_EFFORTS)}. Got {reasoning_effort!r}. "
+                    "GPT-4 and lower ignore this flag."
+                )
+
     if prov == "openai":
-        return OpenAIModelClient(model)
+        return OpenAIModelClient(model, reasoning_effort=reasoning_effort)
     if prov == "anthropic":
-        return AnthropicModelClient(model)
+        return AnthropicModelClient(model, reasoning_effort=reasoning_effort)
     if prov == "bedrock":
-        return BedrockAnthropicClient(model, aws_region=aws_region)
+        return BedrockAnthropicClient(
+            model,
+            aws_region=aws_region,
+            reasoning_effort=reasoning_effort,
+        )
     raise ValueError(f"Unknown provider {provider!r}.")

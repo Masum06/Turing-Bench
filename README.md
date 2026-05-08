@@ -19,7 +19,7 @@ python run_judge.py -m gpt-4o --limit 5 --output smoke.csv
 ```
 
 ```bash
-python run_judge.py -m claude-sonnet-4-5 --limit 5
+python run_judge.py -m claude-sonnet-4-5 --reasoning-effort medium --limit 5
 ```
 
 Bedrock model ids usually contain `anthropic.` or a regional prefix such as `us.anthropic.`:
@@ -66,6 +66,7 @@ If the id is ambiguous or you prefer not to edit the list, pass **`--provider op
 | `--provider` | `auto` (default): infer from `-m`; or `openai`, `anthropic`, `bedrock`, `custom` |
 | `--model`, `-m` | Hosted model id (`auto` / `openai` / `anthropic` / `bedrock`); omit for `custom` |
 | `--aws-region` | Optional for Bedrock (else SDK / boto3 region resolution) |
+| `--reasoning-effort` | Optional provider-native reasoning control. GPT-5/o-series accept `low`, `medium`, `high`; Claude accepts values such as `on`, `off`, `low`, `medium`, `high`, `max`, `xhigh` depending on model support |
 | `--input`, `-i` | Input CSV (default: `turing_test_o50_conversations_shuffled.csv`) |
 | `--output`, `-o` | Output CSV |
 | `--errors` | Error log CSV when rows fail |
@@ -75,7 +76,17 @@ If the id is ambiguous or you prefer not to edit the list, pass **`--provider op
 | `--limit` | First N rows only |
 | `--resume` | Reuse `A`/`B` from existing `--output` |
 
-Sampling temperature, max tokens, and reasoning knobs use **defaults** in code (`ModelClient` in [`model_clients.py`](model_clients.py)); change there if you need different behavior.
+Sampling temperature and max tokens use **defaults** in code (`ModelClient` in [`model_clients.py`](model_clients.py)); change there if you need different behavior.
+
+### Reasoning Effort
+
+Use `--reasoning-effort <value>` to control reasoning depth for hosted models that support it. Values are provider-native; choose a value supported by the model you are running.
+
+- **OpenAI reasoning models** (`gpt-5`, `o1`, `o3`, `o4`, `o5`) receive `reasoning={"effort": <level>}`. GPT-4 and lower reject `--reasoning-effort` because they do not support OpenAI's reasoning parameter.
+- **Claude / Bedrock Claude default** is explicit no-thinking: if you omit `--reasoning-effort`, the runner sends `thinking={"type": "disabled"}`.
+- **Claude / Bedrock Claude** use Anthropic's adaptive thinking API. `on` sends `thinking={"type": "adaptive"}`. `off` sends `thinking={"type": "disabled"}`. Other values, such as `low`, `medium`, `high`, `max`, or `xhigh`, send adaptive thinking plus `output_config={"effort": <value>}`.
+- **Claude 4.5** is included, but only supports `--reasoning-effort on|off` in this runner. Use Claude 4.6+ / Opus 4.7-style models for adaptive effort values like `low`, `medium`, `high`, `max`, or `xhigh`.
+- If a value belongs to another provider (for example, `max` with GPT-5 or `banana` with Claude), or the selected model does not support reasoning effort, the runner raises a descriptive error before the benchmark starts. Anthropic model support varies; pass the exact value supported by your selected Claude model.
 
 ## Environment variables
 
@@ -95,7 +106,7 @@ Variables are read from the process environment. You can set them in a **`.env`*
 
 ### Provider caveats
 
-- **Anthropic / Bedrock**: Extended thinking (if enabled in code via `thinking_budget`) uses `thinking: {type: "enabled", budget_tokens}` with `budget_tokens >= 1024` and `max_tokens > budget_tokens`, per the [Messages API](https://docs.claude.com/en/api/messages).
+- **Anthropic / Bedrock**: `--reasoning-effort` uses Claude adaptive thinking and `output_config.effort` on newer models, per the [Messages API](https://docs.claude.com/en/api/messages). Claude 4.5 uses `on|off` only.
 - **OpenAI**: Uses `responses.create` with `text.format.type = json_object` (Responses API “JSON mode”).
 
 ## Threading
