@@ -6,8 +6,10 @@ Prompts come from ``config`` unchanged; normalization accepts JSON verdicts or p
 
 Supported hosted APIs:
 - OpenAI Responses: https://platform.openai.com/docs/api-reference/responses/create
+- OpenAI Chat Completions: https://developers.openai.com/api/reference/chat-completions/overview
 - Anthropic Messages: https://docs.claude.com/en/api/messages
 - AWS Bedrock (Anthropic SDK): https://github.com/anthropics/anthropic-sdk-python
+- Moonshot/Kimi Chat Completions: https://platform.kimi.ai/docs/api/chat
 
 To support a new model id string, add a substring entry to ``MODEL_SUBSTRING_TO_PROVIDER``.
 
@@ -27,26 +29,36 @@ from config import BASE_DELAY, MAX_RETRIES, SYSTEM_PROMPT, USER_TEMPLATE
 
 # Order matters: first match wins (list longer / more specific substrings first).
 MODEL_SUBSTRING_TO_PROVIDER: list[tuple[str, str]] = [
-    ("us.anthropic.", "bedrock"),
-    ("eu.anthropic.", "bedrock"),
-    ("apac.anthropic.", "bedrock"),
-    ("anthropic.", "bedrock"),
-    ("chatgpt", "openai"),
-    ("claude", "anthropic"),
-    ("sonnet", "anthropic"),
-    ("opus", "anthropic"),
-    ("haiku", "anthropic"),
-    ("gpt", "openai"),
-    ("o1", "openai"),
-    ("o3", "openai"),
-    ("o4", "openai"),
-    ("o5", "openai"),
+    ("us.anthropic.",    "bedrock"),
+    ("eu.anthropic.",    "bedrock"),
+    ("apac.anthropic.",  "bedrock"),
+    ("anthropic.",       "bedrock"),
+    ("claude",           "anthropic"),
+    ("sonnet",           "anthropic"),
+    ("opus",             "anthropic"),
+    ("haiku",            "anthropic"),
+    ("chatgpt",          "openai_responses"),
+    ("gpt-5",            "openai_responses"),
+    ("o1",               "openai_responses"),
+    ("o3",               "openai_responses"),
+    ("o4",               "openai_responses"),
+    ("o5",               "openai_responses"),
+    ("gpt-4o",           "openai_legacy"),
+    ("gpt-4.5",          "openai_legacy"),
+    ("gpt-4.1",          "openai_legacy"),
+    ("gpt-4-turbo",      "openai_legacy"),
+    ("gpt-4",            "openai_legacy"),
+    ("gpt-3.5",          "openai_legacy"),
+    ("gpt",              "openai_legacy"),
+    ("kimi",             "moonshot"),
 ]
 
 OPENAI_REASONING_EFFORTS = ("low", "medium", "high")
 CLAUDE_REASONING_EFFORTS = ("on", "off", "low", "medium", "high", "max", "xhigh")
 CLAUDE_ON_OFF_EFFORTS = ("on", "off")
 CLAUDE_ON_THINKING_BUDGET = 1024
+KIMI_REASONING_EFFORTS = ("enabled", "disabled")
+
 
 
 def infer_provider_from_model(model: str) -> str:
@@ -68,6 +80,7 @@ def infer_provider_from_model(model: str) -> str:
 def normalize_prediction(raw: Any) -> str | None:
     """Return 'A', 'B', or None."""
     if raw is None:
+        print("normalize_prediction | No model response recieved; returning None.")
         return None
     if isinstance(raw, str):
         s = raw.strip().upper()
@@ -86,6 +99,7 @@ def normalize_prediction(raw: Any) -> str | None:
             s = verdict.strip().upper()
             if s in ("A", "B"):
                 return s
+    print("normalize_prediction | No model response recieved; returning None.")
     return None
 
 
@@ -257,6 +271,73 @@ class OpenAIModelClient(ModelClient):
             )
         return (getattr(response, "output_text", None) or "").strip()
 
+# --- Legacy OpenAI ------------------------------------------------------------
+
+JSON_MODE_MIN_DATE = 1106  # inclusive lower bound (MMDD integer)
+
+# Model name fragments that always support JSON mode regardless of date stamp.
+_JSON_MODE_ALWAYS = ("gpt-4-turbo", "gpt-4o", "gpt-4.1", "gpt-4.5")
+
+
+class LegacyOpenAIModelClient(ModelClient):
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        api_key: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(model, **kwargs)
+        self._api_key = api_key
+        self._client = None
+
+    def _ensure_client(self):
+        if self._client is None:
+            import getpass
+            from openai import OpenAI
+
+            key = self._api_key or os.environ.get("OPENAI_API_KEY")
+            if not key:
+                key = getpass.getpass("Enter OpenAI API key: ")
+                os.environ["OPENAI_API_KEY"] = key
+            self._client = OpenAI(api_key=key)
+        return self._client
+
+    def _supports_json_mode(self) -> bool:
+        n = self.model.lower()
+        for fragment in _JSON_MODE_ALWAYS:
+            if fragment in n:
+                return True
+        import re
+        m = re.search(r"-(\d{4})(?:-|$)", n)
+        if m:
+            return int(m.group(1)) >= JSON_MODE_MIN_DATE
+        return False
+
+    def _generate(self, messages: list[dict[str, str]]) -> str:
+        if self.reasoning_effort is not None:
+            raise ValueError(
+                f"LegacyOpenAIModelClient does not support --reasoning-effort. "
+                "The Chat Completions API has no reasoning parameter. "
+                "Remove --reasoning-effort or switch to a Responses-API model."
+            )
+
+        client = self._ensure_client()
+
+        kwargs: dict[str, Any] = dict(
+            model=self.model,
+            messages=messages,          # role/content dicts pass through as-is
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            top_p=1,
+        )
+        if self._supports_json_mode():
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = client.chat.completions.create(**kwargs)
+        return (response.choices[0].message.content or "").strip()
+    
 
 # --- Anthropic ----------------------------------------------------------------
 
@@ -359,6 +440,87 @@ class AnthropicModelClient(ModelClient):
                 text_parts.append(block.text)
         out = "".join(text_parts).strip()
         return out if out else str(msg.content[0])
+    
+
+# --- Kimi ---------------------------------------------------------------------
+
+class MoonshotModelClient(ModelClient):
+    def __init__(
+        self,
+        model: str,
+        *,
+        api_key: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(model, **kwargs)
+        self._api_key = api_key
+        self._client = None
+
+    def _ensure_client(self):
+        if self._client is None:
+            import getpass
+            from openai import OpenAI
+
+            key = self._api_key or os.environ.get("MOONSHOT_API_KEY")
+            if not key:
+                key = getpass.getpass("Enter Moonshot API key: ")
+                os.environ["MOONSHOT_API_KEY"] = key
+            else:
+                src = "constructor arg" if self._api_key else "MOONSHOT_API_KEY env var"
+
+            self._client = OpenAI(api_key=key, base_url="https://api.moonshot.ai/v1")
+        return self._client
+
+    def _use_thinking(self) -> bool:
+        result = self.reasoning_effort != "disabled"
+        return result
+
+    def _generate(self, messages: list[dict[str, str]]) -> str:
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            preview = content[:200] + ("..." if len(content) > 200 else "")
+
+        if self.reasoning_effort and self.reasoning_effort not in KIMI_REASONING_EFFORTS:
+            err = (
+                f"Kimi models accept --reasoning-effort values: "
+                f"{', '.join(KIMI_REASONING_EFFORTS)}. "
+                f"Got {self.reasoning_effort!r}."
+            )
+            raise ValueError(err)
+
+        client = self._ensure_client()
+        thinking = self._use_thinking()
+        temperature = 1.0 if thinking else 0.6
+        extra_body = {} if thinking else {"thinking": {"type": "disabled"}}
+
+        try:
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_completion_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+                extra_body=extra_body,
+            )
+        except Exception as e:
+            raise
+
+        usage = getattr(response, "usage", None)
+        if usage:
+            print(f"[DEBUG]   usage: prompt_tokens={usage.prompt_tokens} completion_tokens={usage.completion_tokens} total_tokens={usage.total_tokens}")
+
+        choices = getattr(response, "choices", [])
+        for i, choice in enumerate(choices):
+            finish = getattr(choice, "finish_reason", "?")
+            raw_content = getattr(choice.message, "content", None)
+            print(f"[DEBUG]   choices[{i}] finish_reason={finish!r}")
+            print(f"[DEBUG]   choices[{i}] raw content ({len(raw_content or '')} chars):")
+            print(raw_content)
+
+        result = (response.choices[0].message.content or "").strip()
+        return result
+    
 
 
 # --- Bedrock ------------------------------------------------------------------
@@ -378,7 +540,8 @@ class BedrockAnthropicClient(ModelClient):
         self._client = None
 
     def _claude_uses_on_off_thinking(self) -> bool:
-        return "4-5" in self.model.lower()
+        m = self.model.lower()
+        return not ("4-6" in m or "4-7" in m)
 
     def _apply_claude_thinking(self, kw: dict[str, Any]) -> None:
         if not self.reasoning_effort:
@@ -559,6 +722,8 @@ def create_model_client(
 
     if prov == "openai":
         return OpenAIModelClient(model, reasoning_effort=reasoning_effort)
+    if prov == "openai_legacy" : 
+        return LegacyOpenAIModelClient(model)
     if prov == "anthropic":
         return AnthropicModelClient(model, reasoning_effort=reasoning_effort)
     if prov == "bedrock":
@@ -567,4 +732,6 @@ def create_model_client(
             aws_region=aws_region,
             reasoning_effort=reasoning_effort,
         )
+    if prov == "moonshot":
+        return MoonshotModelClient(model, reasoning_effort=reasoning_effort)
     raise ValueError(f"Unknown provider {provider!r}.")

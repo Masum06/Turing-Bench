@@ -10,6 +10,7 @@ import argparse
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from pathlib import Path
 
 import pandas as pd
@@ -93,6 +94,8 @@ def run_single(
     rows: list[dict],
     delay: float,
     client: ModelClient,
+    output_path: str,
+    df
 ) -> tuple[list[tuple[int, str]], list[dict]]:
     results: list[tuple[int, str]] = []
     errors: list[dict] = []
@@ -100,18 +103,23 @@ def run_single(
 
     for row in tqdm(rows, desc=desc):
         idx, pred, err_rec = predict_row(row, delay, client)
+        idx, pred, err_rec = predict_row(row, delay, client)
+        df.at[idx, "who_is_human"] = pred
+        df.to_csv(output_path, index=False)
         if err_rec:
             errors.append(err_rec)
         results.append((idx, pred))
 
     return results, errors
 
-
+write_lock = Lock()
 def run_threaded(
     rows: list[dict],
     delay: float,
     n_threads: int,
     client: ModelClient,
+    output_path: str,
+    df
 ) -> tuple[list[tuple[int, str]], list[dict]]:
     results: dict[int, str] = {}
     errors: list[dict] = []
@@ -128,6 +136,9 @@ def run_threaded(
             if err_rec:
                 errors.append(err_rec)
             results[idx] = pred
+            with write_lock: #error on this line
+                df.at[idx, "who_is_human"] = pred
+                df.to_csv(output_path, index=False)
 
     return sorted(results.items()), errors
 
@@ -137,11 +148,13 @@ def run_predictions(
     delay: float,
     n_threads: int,
     client: ModelClient,
+    output_path: str,
+    df
 ) -> tuple[list[tuple[int, str]], list[dict]]:
     try:
         if n_threads > 1:
-            return run_threaded(rows, delay, n_threads, client)
-        return run_single(rows, delay, client)
+            return run_threaded(rows, delay, n_threads, client, output_path, df)
+        return run_single(rows, delay, client, output_path, df)
     except NotImplementedError:
         sys.exit(
             "\npredict() is not implemented yet.\n"
@@ -172,6 +185,9 @@ def run_benchmark(
     if resumed:
         print(f"Resume: reusing {len(resumed)} existing prediction(s).")
 
+    df["who_is_human"] = [resumed.get(i, "NA") for i in range(len(rows))]
+    df.to_csv(output_path, index=False) 
+
     rows_to_run = [row for row in rows if row["_idx"] not in resumed]
     errors_list: list[dict] = []
 
@@ -181,6 +197,8 @@ def run_benchmark(
             delay,
             n_threads,
             client,
+            output_path,
+            df
         )
     else:
         new_results = []
@@ -192,7 +210,7 @@ def run_benchmark(
     if na_indices:
         retry_rows = [row for row in rows_to_run if row["_idx"] in na_indices]
         print(f"\nRetrying {len(retry_rows)} NA row(s) single-threaded...")
-        retry_results, retry_errors = run_predictions(retry_rows, delay, 1, client)
+        retry_results, retry_errors = run_predictions(retry_rows, delay, 1, client, output_path, df)
         predictions_by_idx.update(dict(retry_results))
         errors_list.extend(retry_errors)
 
